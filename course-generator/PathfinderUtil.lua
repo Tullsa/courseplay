@@ -295,6 +295,9 @@ end
 --- This is a simplified implementation of the Separating Axis Test, based on Stephan Schloesser's code in AutoDrive.
 --- The implementation assumes that a and b are rectangles (not any polygon)
 --- We use this during the pathfinding to drive around other vehicles
+---@param a table[] rectangle as an array of four {x, z} tables
+---@param b table[] rectangle as an array of four {x, z} tables
+---@return boolean true when a and b overlap
 function PathfinderUtil.doRectanglesOverlap(a, b)
 
     if math.abs(a[1].x - b[1].x )> 50 then return false end

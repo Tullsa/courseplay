@@ -27,8 +27,8 @@ State3D = CpObject(Vector)
 ---@param pred State3D predecessor node
 ---@param gear HybridAstar.Gear straight/left/right
 ---@param steer HybridAstar.Steer forward/backward
----@param userData table any data the user wants to associate with this state
-function State3D:init(x, y, t, g, pred, gear, steer, userData)
+---@param tTrailer number heading (theta) of the attached trailer in radians
+function State3D:init(x, y, t, g, pred, gear, steer, tTrailer)
     self.x = x
     self.y = y
     self.t = self:normalizeHeadingRad(t)
@@ -40,7 +40,7 @@ function State3D:init(x, y, t, g, pred, gear, steer, userData)
     self.onOpenList = false
     self.open = false
     self.closed = false
-    self.userData = userData
+    self.tTrailer = tTrailer and self:normalizeHeadingRad(tTrailer) or 0
     self.gear = gear or HybridAStar.Gear.Forward
     self.steer = steer
     -- penalty for using this node, to avoid obstacles, stay in an area, etc.
@@ -48,7 +48,7 @@ function State3D:init(x, y, t, g, pred, gear, steer, userData)
 end
 
 function State3D:copy(other)
-    local this = State3D(other.x, other.y, other.t, other.g, other.pred, other.gear, other.steer, other.userData)
+    local this = State3D(other.x, other.y, other.t, other.g, other.pred, other.gear, other.steer, other.tTrailer)
     this.h = other.h
     this.cost = other.cost
     this.goal = other.goal
@@ -57,7 +57,7 @@ function State3D:copy(other)
     this.nodePenalty = other.nodePenalty
     this.gear = other.gear
     this.steer = other.steer
-    this.userData = other.userData
+    this.tTrailer = other.tTrailer
     return this
 end
 
@@ -202,8 +202,9 @@ function State3D:__tostring()
         steer = 'Straight'
     end
     local gear = self.gear == HybridAStar.Gear.Forward and 'Forward' or 'Backward'
-    result = string.format('x: %.2f y:%.2f t:%d(%.2f) gear:%s steer:%s g:%.4f h:%.4f c:%.4f closed:%s open:%s',
-            self.x, self.y, math.deg(self.t), self.t, gear, steer,
+    local tTrailer = self.tTrailer and string.format(' (%d)', math.deg(self.tTrailer)) or ''
+    result = string.format('x: %.2f y:%.2f t:%d%s gear:%s steer:%s g:%.4f h:%.4f c:%.4f closed:%s open:%s',
+            self.x, self.y, math.deg(self.t), tTrailer, gear, steer,
             self.g, self.h, self.cost, tostring(self.closed), tostring(self.onOpenList))
     return result
 end

@@ -205,7 +205,7 @@ function HybridAStar.shortenEnd(path, d)
 	end
 end
 
---- Shorten path by d meters at the end
+--- Smooth the path
 ---@param path Vector[]
 function HybridAStar.smooth(path)
 	local function isNearCusp(i)
@@ -248,6 +248,8 @@ function HybridAStar.MotionPrimitives:init(r, expansionDegree, allowReverse)
 	local dt = math.rad(expansionDegree)
 	local dx = r * math.sin(dt)
 	local dy = r - r * math.cos(dt)
+	-- hitch length of a trailer (length between hitch on the towing vehicle and the rear axle of the trailer)
+	self.hitchLength = 10
 	-- forward straight
 	table.insert(self.primitives, {dx = d, dy = 0, dt = 0, d = d,
 								   gear = HybridAStar.Gear.Forward,
@@ -290,7 +292,11 @@ function HybridAStar.MotionPrimitives:createSuccessor(node, primitive)
 	local ySucc = node.y + primitive.dx * math.sin(node.t) + primitive.dy * math.cos(node.t)
 	-- if the motion primitive has a fixed heading, use that, otherwise the delta
 	local tSucc = primitive.t or node.t + primitive.dt
-	return State3D(xSucc, ySucc, tSucc, node.g, node, primitive.gear, primitive.steer)
+	local tTrailer
+	if self.hitchLength then
+		tTrailer = node.tTrailer + primitive.d / self.hitchLength * math.sin(node.tTrailer - node.t)
+	end
+	return State3D(xSucc, ySucc, tSucc, node.g, node, primitive.gear, primitive.steer, tTrailer)
 end
 
 function HybridAStar.MotionPrimitives:__tostring()
@@ -305,7 +311,7 @@ function HybridAStar.MotionPrimitives:getPrimitives(node)
 	return self.primitives
 end
 
---- A simple set of motion primitives to use with an A start algorithm, pointing to 8 directions
+--- A simple set of motion primitives to use with an A* algorithm, pointing to 8 directions
 ---@param gridSize number search grid size in meters
 HybridAStar.SimpleMotionPrimitives = CpObject(HybridAStar.MotionPrimitives)
 function HybridAStar.SimpleMotionPrimitives:init(gridSize, allowReverse)
@@ -313,14 +319,14 @@ function HybridAStar.SimpleMotionPrimitives:init(gridSize, allowReverse)
 	self.primitives = {}
 	local d = gridSize
 	local dSqrt2 = math.sqrt(2) * d
-	table.insert(self.primitives, {dx =  d, dy =  0, t = 0, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
-	table.insert(self.primitives, {dx =  d, dy =  d, t = 1 * math.pi / 4, d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
-	table.insert(self.primitives, {dx =  0, dy =  d, t = 2 * math.pi / 4, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
-	table.insert(self.primitives, {dx = -d, dy =  d, t = 3 * math.pi / 4 , d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
-	table.insert(self.primitives, {dx = -d, dy =  0, t = 4 * math.pi / 4, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
-	table.insert(self.primitives, {dx = -d, dy = -d, t = 6 * math.pi / 4, d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
-	table.insert(self.primitives, {dx =  0, dy = -d, t = 6 * math.pi / 4, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
-	table.insert(self.primitives, {dx =  d, dy = -d, t = 7 * math.pi / 4, d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx =  d, dy =  0, dt = 0, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx =  d, dy =  d, dt = 1 * math.pi / 4, d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx =  0, dy =  d, dt = 2 * math.pi / 4, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx = -d, dy =  d, dt = 3 * math.pi / 4 , d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx = -d, dy =  0, dt = 4 * math.pi / 4, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx = -d, dy = -d, dt = 6 * math.pi / 4, d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx =  0, dy = -d, dt = 6 * math.pi / 4, d = d, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
+	table.insert(self.primitives, {dx =  d, dy = -d, dt = 7 * math.pi / 4, d = dSqrt2, gear = HybridAStar.Gear.Forward, steer = HybridAStar.Steer.Straight, type = HybridAStar.MotionPrimitiveTypes.NA})
 end
 
 ---@class HybridAStar.NodeList
@@ -779,6 +785,17 @@ function HybridAStarWithAStarInTheMiddle:resume(...)
 			HybridAStar.shortenStart(self.middlePath, self.hybridRange)
 			HybridAStar.shortenEnd(self.middlePath, self.hybridRange)
 			if #self.middlePath < 2 then return true, nil end
+			for i, p in ipairs(self.middlePath) do
+				print(i, tostring(p))
+			end
+			HybridAStar.smooth(self.middlePath)
+			for i, p in ipairs(self.middlePath) do
+				print(i, tostring(p))
+			end
+			State3D.setHeading(self.middlePath)
+			for i, p in ipairs(self.middlePath) do
+				print(i, tostring(p))
+			end
 			return self:findPathFromStartToMiddle()
 		elseif self.phase == self.START_TO_MIDDLE then
 			if path then
