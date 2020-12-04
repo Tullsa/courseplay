@@ -205,28 +205,6 @@ function HybridAStar.shortenEnd(path, d)
 	end
 end
 
---- Smooth the path
----@param path Vector[]
-function HybridAStar.smooth(path)
-	local function isNearCusp(i)
-		if path[i - 2].gear ~= path[i - 1].gear or
-				path[i - 1].gear ~= path[i].gear or
-				path[i + 1].gear ~= path[i].gear or
-				path[i + 2].gear ~= path[i + 1].gear then
-			return true
-		end
-	end
-	for j = 1, 3 do
-		for i = 3, #path - 2  do
-			-- leave points around a cusp alone
-			if not isNearCusp(i) then
-				local currentPoint = Vector(path[i].x, path[i].y)
-				local correction = - (path[i - 2] - 4 * path[i - 1] + 6 * currentPoint - 4 * path[i + 1] + path[i + 2]) / 16
-				path[i]:add(correction)
-			end
-		end
-	end
-end
 
 --- Motion primitives for node expansions, contains the dx/dy/dt values for
 --- driving straight/right/left. The idea is to calculate these once as they are
@@ -287,16 +265,13 @@ end
 ---@param node State3D
 ---@param primitive table
 ---@return State3D
-function HybridAStar.MotionPrimitives:createSuccessor(node, primitive)
+function HybridAStar.MotionPrimitives:createSuccessor(node, primitive, hitchLength)
 	local xSucc = node.x + primitive.dx * math.cos(node.t) - primitive.dy * math.sin(node.t)
 	local ySucc = node.y + primitive.dx * math.sin(node.t) + primitive.dy * math.cos(node.t)
 	-- if the motion primitive has a fixed heading, use that, otherwise the delta
 	local tSucc = primitive.t or node.t + primitive.dt
-	local tTrailer
-	if self.hitchLength then
-		tTrailer = node.tTrailer + primitive.d / self.hitchLength * math.sin(node.tTrailer - node.t)
-	end
-	return State3D(xSucc, ySucc, tSucc, node.g, node, primitive.gear, primitive.steer, tTrailer)
+	return State3D(xSucc, ySucc, tSucc, node.g, node, primitive.gear, primitive.steer,
+			node:getNextTrailerHeading(primitive.d, hitchLength))
 end
 
 function HybridAStar.MotionPrimitives:__tostring()
@@ -512,9 +487,13 @@ function HybridAStar:findPath(start, goal, turnRadius, allowReverse, constraints
 						(self.iterations == 1 or math.random() > 2 * pred.h / self.distanceToGoal) then
 					---@type AnalyticSolution
 					local analyticSolution, pathType = self.analyticSolver:solve(pred, goal, turnRadius, allowReverse)
-					--self:debug('Check analytical solution at iteration %d, %.1f, %.1f', self.iterations, pred.h, pred.h / self.distanceToGoal)
+					self:debug('Check analytical solution at iteration %d, %.1f, %.1f', self.iterations, pred.h, pred.h / self.distanceToGoal)
 					local analyticPath = analyticSolution:getWaypoints(pred, turnRadius)
+					-- making sure we continue with the correct trailer heading
+					analyticPath[1]:setTrailerHeading(pred:getTrailerHeading())
+					State3D.calculateTrailerHeadings(analyticPath, 10)
 					if self:isPathValid(analyticPath) then
+						State3D.printPath(analyticPath, 'ANALYTIC')
 						self:debug('Found collision free analytic path (%s) at iteration %d', pathType, self.iterations)
 						-- remove first node of returned analytic path as it is the same as pred
 						table.remove(analyticPath, 1)
@@ -526,7 +505,7 @@ function HybridAStar:findPath(start, goal, turnRadius, allowReverse, constraints
 			-- create the successor nodes
 			for _, primitive in ipairs(hybridMotionPrimitives:getPrimitives(pred)) do
 				---@type State3D
-				local succ = hybridMotionPrimitives:createSuccessor(pred, primitive)
+				local succ = hybridMotionPrimitives:createSuccessor(pred, primitive, 10)
 				if succ:equals(goal, self.deltaPosGoal, self.deltaThetaGoal) then
 					succ.pred = succ.pred
 					self:debug('Successor at the goal (%d).', self.iterations)
@@ -780,22 +759,15 @@ function HybridAStarWithAStarInTheMiddle:resume(...)
 			if lMiddlePath < self.hybridRange * 2 then
 				return self:findHybridStartToEnd()
 			end
-            -- middle part ready, now trim start and end to make room for the hybrid parts
+			-- middle part ready, now trim start and end to make room for the hybrid parts
 			self.middlePath = path
 			HybridAStar.shortenStart(self.middlePath, self.hybridRange)
 			HybridAStar.shortenEnd(self.middlePath, self.hybridRange)
 			if #self.middlePath < 2 then return true, nil end
-			for i, p in ipairs(self.middlePath) do
-				print(i, tostring(p))
-			end
-			HybridAStar.smooth(self.middlePath)
-			for i, p in ipairs(self.middlePath) do
-				print(i, tostring(p))
-			end
+			State3D.smooth(self.middlePath)
 			State3D.setHeading(self.middlePath)
-			for i, p in ipairs(self.middlePath) do
-				print(i, tostring(p))
-			end
+			State3D.calculateTrailerHeadings(self.middlePath, 10, true)
+			State3D.printPath(self.middlePath, 'MIDDLE')
 			return self:findPathFromStartToMiddle()
 		elseif self.phase == self.START_TO_MIDDLE then
 			if path then
@@ -804,8 +776,7 @@ function HybridAStarWithAStarInTheMiddle:resume(...)
 				self.constraints:resetConstraints()
 				self.path = path
 				-- create start point at the last waypoint of middlePath before shortening
-				self.middleToEndStart = State3D(self.middlePath[#self.middlePath].x, self.middlePath[#self.middlePath].y,
-						(self.middlePath[#self.middlePath] - self.middlePath[#self.middlePath - 1]):heading())
+				self.middleToEndStart = State3D:copy(self.middlePath[#self.middlePath])
 				-- now shorten both ends of middlePath to avoid short fwd/reverse sections due to overlaps (as the
 				-- patfhinding may end anywhere within deltaPosGoal
 				HybridAStar.shortenStart(self.middlePath,self.hybridAStarPathfinder.deltaPosGoal * 2)
@@ -826,7 +797,7 @@ function HybridAStarWithAStarInTheMiddle:resume(...)
 					return true, nil, goalNodeInvalid
 				end
 			end
-		else -- self.phase == self.MIDDLE_TO_END
+		elseif self.phase == self.MIDDLE_TO_END then
 			if path then
 				-- last piece is ready, this was generated from the goal point to the end of the middle section so
 				-- first remove the last point of the middle section to make the transition smoother
@@ -836,7 +807,7 @@ function HybridAStarWithAStarInTheMiddle:resume(...)
 				for i = 1, #path do
 					table.insert(self.path, path[i])
 				end
-				HybridAStar.smooth(self.path)
+				State3D.smooth(self.path)
 			else
 				if self.middleToEndRetries < 1 then
 					self:debug('middle to end did not work out, relax constraints and retry')
